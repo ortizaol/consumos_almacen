@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Validación de Consumos CEPP · Almacén</title>
+<!-- SheetJS (lectura y exportación de .xlsx). Sirve porque el filtro es por VALOR, no por color de celda. -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#ffffff; --panel-2:#f8fafc; --ink:#0f172a; --muted:#64748b;
+    --brand:#1d4ed8; --brand-2:#3b82f6; --line:#e2e8f0; --danger:#dc2626; --danger-bg:#fee2e2;
+    --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --warn-bg:#fef3c7; --shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:linear-gradient(180deg,#f1f5f9,#e2e8f0 320px,#f1f5f9 320px); min-height:100vh;
+  }
+  header.app{
+    background:linear-gradient(120deg,#1e3a8a,#2563eb); color:#fff; padding:22px 28px; box-shadow:var(--shadow);
+  }
+  header.app h1{margin:0; font-size:20px; letter-spacing:.2px}
+  header.app p{margin:4px 0 0; opacity:.85; font-size:13px}
+  .wrap{max-width:1280px; margin:0 auto; padding:24px 20px 60px}
+
+  /* ---- Drop zone ---- */
+  #drop{
+    border:2px dashed var(--brand-2); border-radius:16px; background:var(--panel);
+    padding:38px 24px; text-align:center; transition:.15s; cursor:pointer; box-shadow:var(--shadow);
+  }
+  #drop.drag{background:#eff6ff; border-color:var(--brand); transform:translateY(-1px)}
+  #drop h2{margin:0 0 6px; font-size:17px}
+  #drop p{margin:4px 0; color:var(--muted); font-size:14px}
+  #drop .btn{margin-top:14px}
+  .btn{
+    display:inline-flex; align-items:center; gap:8px; border:0; border-radius:10px; cursor:pointer;
+    font-size:14px; font-weight:600; padding:10px 16px; background:var(--brand); color:#fff; transition:.12s;
+  }
+  .btn:hover{background:#1742c4}
+  .btn.ghost{background:#fff; color:var(--brand); border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--panel-2)}
+  .btn.green{background:var(--ok)} .btn.green:hover{background:#13702f}
+  .btn:disabled{opacity:.5; cursor:not-allowed}
+
+  /* ---- Progress / spinner ---- */
+  #progress{display:none; margin-top:18px}
+  #progress.show{display:block}
+  .bar{height:8px; background:#e2e8f0; border-radius:99px; overflow:hidden}
+  .bar > i{display:block; height:100%; width:0; background:linear-gradient(90deg,#3b82f6,#1d4ed8); transition:width .2s}
+  .prog-row{display:flex; align-items:center; gap:12px; margin-bottom:8px; color:var(--muted); font-size:13px}
+  .spinner{
+    width:18px; height:18px; border:3px solid #cbd5e1; border-top-color:var(--brand); border-radius:50%;
+    animation:spin .8s linear infinite; flex:0 0 auto;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---- Messages ---- */
+  .msg{display:none; margin-top:18px; padding:14px 16px; border-radius:12px; font-size:14px; box-shadow:var(--shadow)}
+  .msg.show{display:block}
+  .msg.error{background:var(--danger-bg); color:#7f1d1d; border:1px solid #fca5a5}
+  .msg.warn{background:var(--warn-bg); color:#7c2d12; border:1px solid #fcd34d}
+  .msg.ok{background:var(--ok-bg); color:#14532d; border:1px solid #86efac}
+  .msg strong{display:block; margin-bottom:2px}
+
+  /* ---- Cards ---- */
+  #results{display:none}
+  #results.show{display:block}
+  .cards{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0}
+  .card{background:var(--panel); border-radius:14px; padding:16px 18px; box-shadow:var(--shadow); border:1px solid var(--line)}
+  .card .lbl{font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:600}
+  .card .val{font-size:28px; font-weight:700; margin-top:6px}
+  .card.danger .val{color:var(--danger)}
+  .card.brand .val{color:var(--brand)}
+
+  /* ---- Toolbar ---- */
+  .toolbar{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--panel);
+    padding:14px; border-radius:14px 14px 0 0; border:1px solid var(--line); border-bottom:0; box-shadow:var(--shadow);
+  }
+  .toolbar input[type=search], .toolbar select{
+    padding:9px 12px; border:1px solid var(--line); border-radius:9px; font-size:14px; background:#fff; color:var(--ink);
+  }
+  .toolbar input[type=search]{min-width:240px; flex:1 1 240px}
+  .toolbar label.check{display:inline-flex; align-items:center; gap:7px; font-size:14px; color:var(--ink); cursor:pointer; user-select:none}
+  .toolbar .spacer{flex:1}
+  .count-tag{font-size:13px; color:var(--muted)}
+
+  /* ---- Table ---- */
+  .table-scroll{overflow:auto; border:1px solid var(--line); border-radius:0 0 14px 14px; background:#fff; box-shadow:var(--shadow); max-height:62vh}
+  table{border-collapse:collapse; width:100%; font-size:13px}
+  thead th{
+    position:sticky; top:0; background:#f1f5f9; color:#334155; text-align:left; padding:11px 12px;
+    border-bottom:2px solid var(--line); white-space:nowrap; cursor:pointer; user-select:none; z-index:2;
+  }
+  thead th:hover{background:#e2e8f0}
+  thead th .arrow{opacity:.35; font-size:11px; margin-left:4px}
+  thead th.sorted .arrow{opacity:1; color:var(--brand)}
+  thead th.num, td.num{text-align:right; font-variant-numeric:tabular-nums}
+  tbody td{padding:9px 12px; border-bottom:1px solid #f1f5f9; white-space:nowrap}
+  tbody tr:hover{background:#f8fafc}
+  tbody tr.falta{background:var(--danger-bg)}
+  tbody tr.falta:hover{background:#fecaca}
+  tbody td.obs{font-weight:700; color:var(--danger)}
+  td.desc{white-space:normal; min-width:220px; max-width:380px}
+  .pill{display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:700; background:#e0e7ff; color:#3730a3}
+  .empty-tbl{text-align:center; padding:40px; color:var(--muted)}
+  .reset-link{background:none;border:0;color:var(--brand);cursor:pointer;font-size:13px;text-decoration:underline}
+  footer{color:var(--muted); font-size:12px; text-align:center; padding:24px 0 0}
+</style>
+</head>
+<body>
+<header class="app">
+  <h1>Validación de Consumos CEPP · Almacén</h1>
+  <p>Lee el Excel de manufactura, filtra el material CEPP, lo cruza contra inventario y calcula la validación de existencia. 100% en el navegador, sin servidor.</p>
+</header>
+
+<div class="wrap">
+  <!-- Carga -->
+  <div id="drop" tabindex="0" role="button" aria-label="Cargar archivo Excel">
+    <h2>📂 Arrastra aquí tu archivo <code>.xlsx</code></h2>
+    <p>o haz clic para seleccionarlo desde tu equipo</p>
+    <p style="font-size:12px">Hojas esperadas: <b>MANUFACTURA</b>, <b>INV001</b> y (opcional) <b>INV043</b></p>
+    <button class="btn" type="button" id="pickBtn">Seleccionar archivo</button>
+    <input type="file" id="file" accept=".xlsx,.xls" hidden>
+    <div id="progress">
+      <div class="prog-row"><div class="spinner"></div><span id="progText">Procesando…</span></div>
+      <div class="bar"><i id="progBar"></i></div>
+    </div>
+  </div>
+
+  <div id="errBox"  class="msg error"></div>
+  <div id="warnBox" class="msg warn"></div>
+  <div id="okBox"   class="msg ok"></div>
+
+  <!-- Resultados -->
+  <div id="results">
+    <div class="cards">
+      <div class="card brand"><div class="lbl">Ítems validados</div><div class="val" id="cItems">0</div></div>
+      <div class="card"><div class="lbl">SOLICITUD requerida</div><div class="val" id="cSol">0</div></div>
+      <div class="card danger"><div class="lbl">No salen por existencia</div><div class="val" id="cFalta">0</div></div>
+      <div class="card"><div class="lbl">Bodegas detectadas</div><div class="val" id="cBod">0</div></div>
+    </div>
+
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="🔎 Buscar por código o descripción…">
+      <select id="filterBod"><option value="">Todas las bodegas</option></select>
+      <label class="check"><input type="checkbox" id="onlyFalta"> Solo faltantes</label>
+      <span class="spacer"></span>
+      <span class="count-tag" id="countTag"></span>
+      <button class="btn green" id="expXlsx">⬇️ Excel (.xlsx)</button>
+      <button class="btn ghost" id="expCsv">⬇️ CSV</button>
+    </div>
+    <div class="table-scroll">
+      <table id="tbl">
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Procesamiento local · No se envía ningún dato a Internet · El archivo permanece en tu equipo.</footer>
+</div>
+
+<script>
+"use strict";
+(function(){
+  // ---------------------------------------------------------------------------
+  // Utilidades
+  // ---------------------------------------------------------------------------
+  const $ = (id)=>document.getElementById(id);
+  const norm = (s)=> String(s==null?'':s).toLowerCase().replace(/[._\-/]/g,' ').replace(/\s+/g,' ').trim();
+  const fmt = (n)=> (typeof n==='number'&&isFinite(n)) ? n.toLocaleString('es-CO') : n;
+  const toNum = (v)=>{
+    if(v==null||v==='') return 0;
+    if(typeof v==='number') return v;
+    const s = String(v).trim().replace(/\s/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',', '.');
+    const n = parseFloat(s);
+    return isFinite(n)? n : 0;
+  };
+
+  // Encuentra el índice de columna por nombre (tolerante a may/min, espacios, puntos).
+  function findCol(headers, candidates){
+    const H = headers.map(norm);
+    for(const cand of candidates){
+      const c = norm(cand);
+      let i = H.indexOf(c);
+      if(i>=0) return i;
+    }
+    // coincidencia parcial (contiene)
+    for(const cand of candidates){
+      const c = norm(cand);
+      for(let i=0;i<H.length;i++){ if(H[i].includes(c)) return i; }
+    }
+    return -1;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Estado
+  // ---------------------------------------------------------------------------
+  let MODEL = null;        // { rows:[], bodegas:[], hasFalta }
+  let sortState = { key:null, dir:1 };
+
+  // ---------------------------------------------------------------------------
+  // Mensajería UI
+  // ---------------------------------------------------------------------------
+  function clearMsgs(){ ['errBox','warnBox','okBox'].forEach(id=>{ const e=$(id); e.className='msg '+id.replace('Box',''); e.innerHTML=''; }); }
+  function showMsg(box, title, body){ const e=$(box); e.innerHTML = '<strong>'+title+'</strong>'+(body?body:''); e.classList.add('show'); }
+  function fatal(title, body){ showMsg('errBox','⛔ '+title, body||''); $('results').classList.remove('show'); setProgress(false); }
+
+  function setProgress(on, txt, pct){
+    const p=$('progress');
+    if(on){ p.classList.add('show'); if(txt) $('progText').textContent=txt; if(pct!=null) $('progBar').style.width=pct+'%'; }
+    else { p.classList.remove('show'); $('progBar').style.width='0%'; }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Carga de archivo
+  // ---------------------------------------------------------------------------
+  const drop=$('drop'), fileInput=$('file');
+  $('pickBtn').addEventListener('click', (e)=>{ e.stopPropagation(); fileInput.click(); });
+  drop.addEventListener('click', ()=> fileInput.click());
+  drop.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } });
+  ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev,(e)=>{ e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev,(e)=>{ e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop',(e)=>{ const f=e.dataTransfer.files && e.dataTransfer.files[0]; if(f) handleFile(f); });
+  fileInput.addEventListener('change',(e)=>{ const f=e.target.files && e.target.files[0]; if(f) handleFile(f); });
+
+  function handleFile(file){
+    clearMsgs();
+    $('results').classList.remove('show');
+    MODEL=null;
+    if(!/\.(xlsx|xls)$/i.test(file.name)){
+      fatal('Archivo no válido', 'Selecciona un archivo de Excel con extensión <b>.xlsx</b> o <b>.xls</b>.');
+      return;
+    }
+    setProgress(true, 'Leyendo "'+file.name+'"…', 5);
+
+    const reader = new FileReader();
+    reader.onprogress = (e)=>{ if(e.lengthComputable){ setProgress(true, 'Leyendo archivo…', 5 + Math.round((e.loaded/e.total)*35)); } };
+    reader.onerror = ()=> fatal('No se pudo leer el archivo', 'Vuelve a intentarlo o verifica que el archivo no esté dañado.');
+    reader.onload = (e)=>{
+      setProgress(true, 'Procesando hojas…', 45);
+      // Cede el hilo para que el spinner se pinte antes del parseo pesado.
+      setTimeout(()=>{ try{ parseWorkbook(e.target.result); }catch(err){ console.error(err); fatal('Error al procesar el archivo', '<br>'+(err && err.message? err.message:String(err))); } }, 60);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Parseo + lógica de negocio
+  // ---------------------------------------------------------------------------
+  function sheetByName(wb, name){
+    const target = norm(name);
+    const real = wb.SheetNames.find(n=> norm(n)===target);
+    return real ? { name:real, ws:wb.Sheets[real] } : null;
+  }
+  function aoa(ws){ return XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''}); }
+
+  // Construye un mapa VLOOKUP: itemNormalizado -> primera "Cant. disponible".
+  function buildInvMap(ws, sheetLabel){
+    const rows = aoa(ws);
+    if(!rows.length) return {map:new Map(), warn:'La hoja '+sheetLabel+' está vacía.'};
+    const headers = rows[0].map(h=>String(h));
+    let itemCol = findCol(headers, ['Item','Código','Codigo','Cod item']);
+    let dispCol = findCol(headers, ['Cant. disponible','Cantidad disponible','Cant disponible','Disponible']);
+    if(dispCol<0) dispCol = 7; // 8.ª columna (índice 7) como respaldo
+    if(itemCol<0) itemCol = 0;
+    const map = new Map();
+    for(let r=1;r<rows.length;r++){
+      const row=rows[r]; if(!row || row.length===0) continue;
+      const rawItem = row[itemCol];
+      if(rawItem===''||rawItem==null) continue;
+      const key = String(rawItem).trim();
+      if(!map.has(key)) map.set(key, toNum(row[dispCol])); // primera coincidencia (VLOOKUP)
+    }
+    return {map, warn:null};
+  }
+
+  function parseWorkbook(buf){
+    const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
+
+    // --- Hoja MANUFACTURA (obligatoria) ---
+    const man = sheetByName(wb,'MANUFACTURA');
+    if(!man){
+      fatal('Falta la hoja «MANUFACTURA»', '<br>El archivo debe contener una hoja llamada <b>MANUFACTURA</b>. Hojas encontradas: '+wb.SheetNames.map(n=>'<code>'+n+'</code>').join(', ')+'.');
+      return;
+    }
+    // --- Hoja INV001 (obligatoria) ---
+    const inv001 = sheetByName(wb,'INV001');
+    if(!inv001){
+      fatal('Falta la hoja «INV001»', '<br>El archivo debe contener la hoja de inventario <b>INV001</b>. Hojas encontradas: '+wb.SheetNames.map(n=>'<code>'+n+'</code>').join(', ')+'.');
+      return;
+    }
+    const inv043 = sheetByName(wb,'INV043'); // opcional
+
+    setProgress(true, 'Leyendo MANUFACTURA…', 55);
+    const rows = aoa(man.ws);
+    if(rows.length < 2){ fatal('La hoja MANUFACTURA no tiene datos', '<br>No se encontraron filas debajo de los encabezados.'); return; }
+
+    const headers = rows[0].map(h=>String(h));
+    const cTipo = findCol(headers, ['TIPO CONSUMO','Tipo consumo','Tipo de consumo']);
+    if(cTipo<0){
+      fatal('No existe la columna «TIPO CONSUMO»', '<br>No se pudo ubicar la columna <b>TIPO CONSUMO</b> en MANUFACTURA. Encabezados detectados: '+headers.map(h=>'<code>'+h+'</code>').join(', ')+'.');
+      return;
+    }
+    const cBod  = findCol(headers, ['Bodega','Bod']);
+    const cItem = findCol(headers, ['Item','Código','Codigo']);
+    const cDesc = findCol(headers, ['Desc. item','Desc item','Descripcion','Descripción','Desc']);
+    const cUM   = findCol(headers, ['U.M.','UM','Unidad','U M']);
+    const cSol  = findCol(headers, ['SOLICITUD','Solicitud','Cantidad solicitada']);
+    const cUEFC = findCol(headers, ['UE_FC','UE-FC','UE FC','UEFC']);
+
+    const missing = [];
+    if(cBod<0)  missing.push('Bodega');
+    if(cItem<0) missing.push('Item');
+    if(cSol<0)  missing.push('SOLICITUD');
+    if(missing.length){
+      fatal('Faltan columnas obligatorias en MANUFACTURA', '<br>No se ubicaron: <b>'+missing.join(', ')+'</b>.<br>Encabezados detectados: '+headers.map(h=>'<code>'+h+'</code>').join(', ')+'.');
+      return;
+    }
+
+    setProgress(true, 'Filtrando filas CEPP…', 70);
+
+    // --- Filtro CEPP (sin distinguir may/min, con trim) ---
+    const grupos = new Map();      // clave item-identidad -> {item,desc,um,uefc,bodegas:{}, total}
+    const bodegasSet = new Set();
+    let cepp = 0;
+
+    for(let r=1;r<rows.length;r++){
+      const row = rows[r]; if(!row || row.length===0) continue;
+      const tipo = String(row[cTipo]==null?'':row[cTipo]).trim().toUpperCase();
+      if(tipo !== 'CEPP') continue;
+      cepp++;
+
+      const item = String(row[cItem]==null?'':row[cItem]).trim();
+      const desc = cDesc>=0 ? String(row[cDesc]==null?'':row[cDesc]).trim() : '';
+      const um   = cUM>=0   ? String(row[cUM]==null?'':row[cUM]).trim()   : '';
+      const uefc = cUEFC>=0 ? String(row[cUEFC]==null?'':row[cUEFC]).trim(): '';
+      const bod  = String(row[cBod]==null?'':row[cBod]).trim();   // limpia "001  "
+      const sol  = toNum(row[cSol]);
+
+      bodegasSet.add(bod);
+      const key = item+'|'+desc+'|'+um+'|'+uefc;
+      let g = grupos.get(key);
+      if(!g){ g={item,desc,um,uefc,bodegas:{},total:0}; grupos.set(key,g); }
+      g.bodegas[bod] = (g.bodegas[bod]||0) + sol;
+      g.total += sol;
+    }
+
+    if(cepp===0){
+      fatal('Ninguna fila tiene TIPO CONSUMO = CEPP', '<br>Se revisaron '+(rows.length-1)+' filas en MANUFACTURA y no se encontró ningún registro con <b>CEPP</b>. Verifica que estás cargando el archivo correcto.');
+      return;
+    }
+
+    setProgress(true, 'Cruzando contra inventario…', 85);
+
+    // --- Inventarios (VLOOKUP, primera coincidencia) ---
+    const inv001Map = buildInvMap(inv001.ws, 'INV001').map;
+    const inv043Res = inv043 ? buildInvMap(inv043.ws, 'INV043') : null;
+    const inv043Map = inv043Res ? inv043Res.map : null;
+
+    const bodegas = Array.from(bodegasSet).sort();
+    const need043 = bodegas.includes('043');
+    let warn = '';
+    if(need043 && !inv043){
+      warn += 'Hay filas con bodega <b>043</b> pero el archivo no incluye la hoja <b>INV043</b>; para esos ítems el inventario se tomó como 0. ';
+    }
+
+    // --- Construir filas finales ---
+    const out = [];
+    let totalSol=0, falta=0;
+    for(const g of grupos.values()){
+      // Inventario correspondiente: INV043 si la bodega del ítem es 043, en otro caso INV001.
+      const itemBods = Object.keys(g.bodegas);
+      const use043 = itemBods.includes('043') && inv043Map;
+      const invMap = use043 ? inv043Map : inv001Map;
+      const inv = invMap.has(g.item) ? invMap.get(g.item) : 0;  // primera coincidencia; 0 si no existe
+      const val = inv - g.total;
+      const obs = val < 0 ? 'NO SALE POR EXISTENCIA' : '';
+
+      totalSol += g.total;
+      if(val<0) falta++;
+
+      out.push({
+        obs, item:g.item, desc:g.desc, um:g.um, uefc:g.uefc,
+        bodegas:g.bodegas, total:g.total, inv, val
+      });
+    }
+
+    MODEL = { rows:out, bodegas };
+    sortState = { key:null, dir:1 };
+
+    setProgress(true, 'Listo', 100);
+    setTimeout(()=> setProgress(false), 350);
+
+    // Mensajes informativos
+    if(warn) showMsg('warnBox','⚠️ Aviso', '<br>'+warn);
+    showMsg('okBox','✅ Procesado correctamente',
+      '<br>'+cepp+' fila(s) con <b>CEPP</b> · '+out.length+' ítem(s) único(s) · '+
+      bodegas.length+' bodega(s): '+bodegas.map(b=>'<code>'+b+'</code>').join(', ')+'.');
+
+    renderAll();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+  function baseCols(){
+    return [
+      {key:'obs',   label:'OBSERVACION', num:false},
+      {key:'item',  label:'Item',        num:false},
+      {key:'desc',  label:'Desc. item',  num:false},
+      {key:'um',    label:'U.M.',        num:false},
+      {key:'uefc',  label:'UE-FC',       num:false},
+    ];
+  }
+  function tailCols(){
+    return [
+      {key:'total', label:'Total general', num:true},
+      {key:'inv',   label:'INV',           num:true},
+      {key:'val',   label:'VAL',           num:true},
+    ];
+  }
+  function allCols(){
+    const bodCols = MODEL.bodegas.map(b=>({key:'bod:'+b, label:b, num:true, bod:b}));
+    return baseCols().concat(bodCols, tailCols());
+  }
+  function cellValue(row, col){
+    if(col.bod!==undefined) return row.bodegas[col.bod]!=null ? row.bodegas[col.bod] : 0;
+    return row[col.key];
+  }
+
+  function renderAll(){
+    $('results').classList.add('show');
+    // Cards
+    $('cItems').textContent = fmt(MODEL.rows.length);
+    $('cSol').textContent   = fmt(MODEL.rows.reduce((a,r)=>a+r.total,0));
+    $('cFalta').textContent = fmt(MODEL.rows.filter(r=>r.val<0).length);
+    $('cBod').textContent   = fmt(MODEL.bodegas.length);
+    // Filtro de bodega
+    const sel=$('filterBod');
+    sel.innerHTML='<option value="">Todas las bodegas</option>'+MODEL.bodegas.map(b=>'<option value="'+b+'">Bodega '+b+'</option>').join('');
+    // Encabezados
+    const cols=allCols();
+    $('thead').innerHTML = cols.map(c=>{
+      const sorted = sortState.key===c.key ? ' sorted':'';
+      const arrow = sortState.key===c.key ? (sortState.dir>0?'▲':'▼') : '↕';
+      return '<th class="'+(c.num?'num':'')+sorted+'" data-key="'+c.key+'">'+escapeHtml(c.label)+'<span class="arrow">'+arrow+'</span></th>';
+    }).join('');
+    $('thead').querySelectorAll('th').forEach(th=> th.addEventListener('click', ()=> onSort(th.dataset.key)));
+    renderBody();
+  }
+
+  function getFiltered(){
+    const q = norm($('search').value);
+    const bod = $('filterBod').value;
+    const onlyFalta = $('onlyFalta').checked;
+    let rows = MODEL.rows.filter(r=>{
+      if(onlyFalta && !(r.val<0)) return false;
+      if(bod && !(r.bodegas[bod]!=null)) return false;
+      if(q){
+        const hay = norm(r.item).includes(q) || norm(r.desc).includes(q);
+        if(!hay) return false;
+      }
+      return true;
+    });
+    if(sortState.key){
+      const col = allCols().find(c=>c.key===sortState.key);
+      rows = rows.slice().sort((a,b)=>{
+        let va=cellValue(a,col), vb=cellValue(b,col);
+        if(col.num){ va=Number(va)||0; vb=Number(vb)||0; return (va-vb)*sortState.dir; }
+        va=String(va).toLowerCase(); vb=String(vb).toLowerCase();
+        return va<vb? -sortState.dir : va>vb? sortState.dir : 0;
+      });
+    }
+    return rows;
+  }
+
+  function renderBody(){
+    const cols=allCols();
+    const rows=getFiltered();
+    const tb=$('tbody');
+    if(!rows.length){
+      tb.innerHTML='<tr><td class="empty-tbl" colspan="'+cols.length+'">Sin resultados para los filtros actuales. <button class="reset-link" id="resetF">Limpiar filtros</button></td></tr>';
+      const rb=$('resetF'); if(rb) rb.addEventListener('click', resetFilters);
+    } else {
+      const html=[];
+      for(const r of rows){
+        const falta = r.val<0;
+        html.push('<tr class="'+(falta?'falta':'')+'">');
+        for(const c of cols){
+          const v=cellValue(r,c);
+          if(c.key==='obs') html.push('<td class="obs">'+(v?'⛔ '+escapeHtml(v):'')+'</td>');
+          else if(c.key==='desc') html.push('<td class="desc">'+escapeHtml(v)+'</td>');
+          else if(c.bod!==undefined) html.push('<td class="num">'+(v?fmt(v):'')+'</td>');
+          else if(c.num) html.push('<td class="num">'+fmt(v)+'</td>');
+          else if(c.key==='item') html.push('<td><span class="pill">'+escapeHtml(v)+'</span></td>');
+          else html.push('<td>'+escapeHtml(v)+'</td>');
+        }
+        html.push('</tr>');
+      }
+      tb.innerHTML=html.join('');
+    }
+    $('countTag').textContent = rows.length+' de '+MODEL.rows.length+' ítem(s)';
+  }
+
+  function onSort(key){
+    if(sortState.key===key) sortState.dir*=-1;
+    else { sortState.key=key; sortState.dir=1; }
+    renderAll();
+  }
+  function resetFilters(){
+    $('search').value=''; $('filterBod').value=''; $('onlyFalta').checked=false; renderBody();
+  }
+  function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  $('search').addEventListener('input', renderBody);
+  $('filterBod').addEventListener('change', renderBody);
+  $('onlyFalta').addEventListener('change', renderBody);
+
+  // ---------------------------------------------------------------------------
+  // Export
+  // ---------------------------------------------------------------------------
+  function exportMatrix(){
+    const cols=allCols();
+    const header=cols.map(c=>c.label);
+    const rows=getFiltered();
+    const data=[header];
+    for(const r of rows){
+      data.push(cols.map(c=>{
+        const v=cellValue(r,c);
+        return (c.num || c.bod!==undefined) ? (Number(v)||0) : (v==null?'':v);
+      }));
+    }
+    return data;
+  }
+  function tstamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes()); }
+
+  $('expXlsx').addEventListener('click', ()=>{
+    if(!MODEL) return;
+    const ws=XLSX.utils.aoa_to_sheet(exportMatrix());
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Validacion CEPP');
+    XLSX.writeFile(wb, 'validacion_cepp_'+tstamp()+'.xlsx');
+  });
+
+  $('expCsv').addEventListener('click', ()=>{
+    if(!MODEL) return;
+    const data=exportMatrix();
+    // Separador ';' + BOM UTF-8 para apertura limpia en Excel en español.
+    const csv='﻿'+data.map(row=> row.map(cell=>{
+      let s=String(cell==null?'':cell);
+      if(/[";\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+      return s;
+    }).join(';')).join('\r\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='validacion_cepp_'+tstamp()+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+  });
+})();
+</script>
+</body>
+</html>
