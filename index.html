@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Validación de Consumos CEPP · Almacén</title>
-<!-- SheetJS (lectura y exportación de .xlsx). Sirve porque el filtro es por VALOR, no por color de celda. -->
+<!-- SheetJS: lectura/parseo del .xlsx y exportación a CSV (filtro por VALOR, no por color). -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- ExcelJS: exportación a .xlsx PRESERVANDO el formato y los colores de celda originales. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --bg:#0f172a; --panel:#ffffff; --panel-2:#f8fafc; --ink:#0f172a; --muted:#64748b;
@@ -278,6 +280,8 @@
   }
 
   function parseWorkbook(buf){
+    // Copia independiente del archivo original para re-exportarlo con estilos (ExcelJS).
+    const rawBuffer = buf.slice(0);
     const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
 
     // --- Hoja MANUFACTURA (obligatoria) ---
@@ -393,7 +397,11 @@
       // Referencias a las hojas ORIGINALES del workbook ya parseado, para re-exportarlas
       // tal cual (SheetJS gratuito conserva valores; el formato visual no se preserva).
       source:{
-        manWs:   man.ws,
+        buffer:  rawBuffer,        // archivo original (para re-exportar con estilos vía ExcelJS)
+        manName: man.name,         // nombres reales de hoja en el archivo
+        inv001Name: inv001.name,
+        inv043Name: inv043 ? inv043.name : null,
+        manWs:   man.ws,           // objetos de hoja SheetJS (respaldo de export por valores)
         inv001Ws:inv001.ws,
         inv043Ws:inv043 ? inv043.ws : null,
         manRows: rows,   // AoA original de MANUFACTURA (encabezados + filas, sin modificar)
@@ -548,36 +556,140 @@
   }
   function tstamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes()); }
 
-  // Filas de MANUFACTURA con TIPO CONSUMO = CEPP, conservando encabezados y todas
-  // las columnas originales, sin modificar valores (mismo criterio: trim + sin may/min).
+  function xlsxName(){ return 'validacion_cepp_'+tstamp()+'.xlsx'; }
+  function downloadBlob(blob, filename){
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+  }
+  function setExportBusy(on){
+    const b=$('expXlsx');
+    b.disabled=on; b.textContent = on ? '⏳ Generando…' : '⬇️ Excel (.xlsx)';
+  }
+
+  // Filas (AoA) de MANUFACTURA con TIPO CONSUMO = CEPP, encabezados + columnas originales.
   function ceppSheetAoa(){
     const src=MODEL.source, rows=src.manRows, cTipo=src.cTipo;
-    const out=[rows[0]]; // encabezados originales
+    const out=[rows[0]];
     for(let r=1;r<rows.length;r++){
       const row=rows[r]; if(!row || row.length===0) continue;
-      const tipo=String(row[cTipo]==null?'':row[cTipo]).trim().toUpperCase();
-      if(tipo==='CEPP') out.push(row);
+      if(String(row[cTipo]==null?'':row[cTipo]).trim().toUpperCase()==='CEPP') out.push(row);
     }
     return out;
   }
 
-  $('expXlsx').addEventListener('click', ()=>{
-    if(!MODEL) return;
+  // ---- Camino A: ExcelJS — preserva colores/formato de las hojas originales ----
+  function cellText(v){
+    if(v==null) return '';
+    if(typeof v==='object'){
+      if(Array.isArray(v.richText)) return v.richText.map(t=>t.text).join('');
+      if(v.text!=null) return String(v.text);
+      if(v.result!=null) return String(v.result);
+      return '';
+    }
+    return String(v);
+  }
+  // Copia una hoja completa (valores + estilos + anchos) a otro workbook ExcelJS.
+  // rowFilter(row, n) opcional: si devuelve false, la fila se omite (para la hoja CEPP).
+  function copyWorksheet(srcWs, destWb, name, rowFilter){
+    const dst=destWb.addWorksheet(name);
+    if(srcWs.columns){
+      srcWs.columns.forEach((col,i)=>{ if(col && col.width) dst.getColumn(i+1).width=col.width; });
+    }
+    let dstNum=0;
+    srcWs.eachRow({includeEmpty:true}, (row, rowNumber)=>{
+      if(rowFilter && !rowFilter(row, rowNumber)) return;
+      dstNum++;
+      const nr=dst.getRow(dstNum);
+      if(row.height) nr.height=row.height;
+      row.eachCell({includeEmpty:true}, (cell, colNumber)=>{
+        const nc=nr.getCell(colNumber);
+        nc.value=cell.value;
+        if(cell.style) nc.style=JSON.parse(JSON.stringify(cell.style)); // conserva fill/font/borde/etc.
+      });
+      nr.commit();
+    });
+    return dst;
+  }
+  function buildAnalisisSheet(destWb){
+    const data=exportMatrix();           // [encabezados, ...filas] con valores ya calculados
+    const cols=allCols();
+    const valIdx=cols.findIndex(c=>c.key==='val');
+    const ws=destWb.addWorksheet('ANALISIS');
+    data.forEach((arr, i)=>{
+      const r=ws.addRow(arr);
+      if(i===0){
+        r.font={bold:true};
+        r.eachCell(c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF1F5F9'}}; });
+      } else if((Number(arr[valIdx])||0) < 0){   // resalta faltantes igual que en pantalla
+        r.eachCell({includeEmpty:true}, c=>{ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFEE2E2'}}; });
+        r.getCell(1).font={bold:true, color:{argb:'FFDC2626'}};
+      }
+    });
+    const header=data[0]||[];
+    for(let i=1;i<=header.length;i++){ ws.getColumn(i).width = (i===3)?42:14; }
+    return ws;
+  }
+  async function exportXlsxStyled(){
+    const src=MODEL.source;
+    const wbIn=new ExcelJS.Workbook();
+    await wbIn.xlsx.load(src.buffer);
+
+    const wsMan  = wbIn.getWorksheet(src.manName);
+    const wsInv1 = wbIn.getWorksheet(src.inv001Name);
+    const wsInv43= src.inv043Name ? wbIn.getWorksheet(src.inv043Name) : null;
+    if(!wsMan || !wsInv1) throw new Error('No se localizaron las hojas originales en el archivo.');
+
+    const wbOut=new ExcelJS.Workbook();
+    wbOut.creator='Validación Consumos CEPP';
+    // 1) MANUFACTURA, 2) INV001, 3) INV043 (opcional) — con su formato original.
+    copyWorksheet(wsMan,  wbOut, 'MANUFACTURA');
+    copyWorksheet(wsInv1, wbOut, 'INV001');
+    if(wsInv43) copyWorksheet(wsInv43, wbOut, 'INV043');
+    // 4) CEPP — filas CEPP de MANUFACTURA, conservando estilos (incluye el marcado de control).
+    const cTipoCol=src.cTipo+1; // ExcelJS usa columnas 1-based
+    copyWorksheet(wsMan, wbOut, 'CEPP', (row, n)=> n===1 || cellText(row.getCell(cTipoCol).value).trim().toUpperCase()==='CEPP');
+    // 5) ANALISIS — tabla calculada.
+    buildAnalisisSheet(wbOut);
+
+    const buf=await wbOut.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), xlsxName());
+  }
+
+  // ---- Camino B (respaldo): SheetJS — datos completos pero SIN formato ----
+  function exportXlsxValues(){
     const src=MODEL.source;
     const wb=XLSX.utils.book_new();
-
-    // 1) MANUFACTURA — hoja original tal cual fue cargada (se reutiliza el objeto de hoja).
     XLSX.utils.book_append_sheet(wb, src.manWs, 'MANUFACTURA');
-    // 2) INV001 — hoja de inventario original tal cual.
     XLSX.utils.book_append_sheet(wb, src.inv001Ws, 'INV001');
-    // 3) INV043 — solo si existía en el archivo de entrada.
     if(src.inv043Ws) XLSX.utils.book_append_sheet(wb, src.inv043Ws, 'INV043');
-    // 4) CEPP — filas de MANUFACTURA con TIPO CONSUMO = CEPP (mismas columnas).
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ceppSheetAoa()), 'CEPP');
-    // 5) ANALISIS — tabla de análisis que ya genera el aplicativo.
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(exportMatrix()), 'ANALISIS');
+    XLSX.writeFile(wb, xlsxName());
+  }
 
-    XLSX.writeFile(wb, 'validacion_cepp_'+tstamp()+'.xlsx');
+  $('expXlsx').addEventListener('click', async ()=>{
+    if(!MODEL) return;
+    setExportBusy(true);
+    try{
+      if(typeof ExcelJS!=='undefined' && MODEL.source.buffer){
+        await exportXlsxStyled();   // conserva colores/formato originales
+      }else{
+        exportXlsxValues();
+        showMsg('warnBox','⚠️ Exportado sin formato','<br>No se pudo cargar la librería de estilos (ExcelJS). El Excel se generó con todos los datos pero sin colores ni formato original.');
+      }
+    }catch(err){
+      console.error(err);
+      try{
+        exportXlsxValues();         // respaldo: al menos los datos completos
+        showMsg('warnBox','⚠️ Exportado sin formato','<br>No se pudo preservar el formato original; el Excel se generó con todos los datos pero sin colores.<br><small>'+escapeHtml(err&&err.message?err.message:String(err))+'</small>');
+      }catch(e2){
+        fatal('No se pudo exportar a Excel','<br>'+escapeHtml(e2&&e2.message?e2.message:String(e2)));
+      }
+    }finally{
+      setExportBusy(false);
+    }
   });
 
   $('expCsv').addEventListener('click', ()=>{

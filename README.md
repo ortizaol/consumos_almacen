@@ -24,11 +24,15 @@ El `.xlsx` descargado incluye, en este orden, las siguientes hojas:
 | `CEPP` | Filas de `MANUFACTURA` con `TIPO CONSUMO = CEPP`, con todas las columnas originales. |
 | `ANALISIS` | Tabla de análisis (OBSERVACION, Item, ..., columnas por bodega, Total general, INV, VAL). |
 
-> **Nota sobre el formato:** SheetJS en su versión gratuita exporta **solo valores, no formato**.
-> Las hojas originales conservan todos los datos, pero pierden colores de relleno, anchos de
-> columna y estilos al re-exportarse. Si el área de almacén necesita preservar el formato visual
-> original (por ejemplo, el marcado en amarillo como control humano), se debe evaluar una
-> librería alternativa como **ExcelJS**. La exportación a **CSV** no cambió.
+> **Formato y colores originales:** la exportación a `.xlsx` usa **ExcelJS**, que **preserva el
+> formato de celda original** (colores de relleno, fuentes, bordes y anchos de columna) de las
+> hojas `MANUFACTURA`, `INV001` e `INV043`. La hoja `CEPP` se arma copiando las filas CEPP desde
+> `MANUFACTURA` **conservando su formato** (incluido el marcado en amarillo usado como control
+> humano). La hoja `ANALISIS` resalta en rojo los ítems con `VAL < 0`, igual que en pantalla.
+>
+> Si ExcelJS no llega a cargar (por ejemplo, sin acceso a su CDN), el aplicativo **recurre
+> automáticamente** a un export de respaldo con SheetJS: genera el mismo libro con todos los
+> datos pero **sin formato**, y avisa en pantalla. La exportación a **CSV** no cambió.
 
 > Requiere conexión a internet la primera vez para cargar la librería **SheetJS** desde su CDN.
 
