@@ -12,6 +12,24 @@ no hay servidor, no se sube ningún dato y **no requiere Microsoft Excel** para 
 3. Revisa las tarjetas de resumen y la tabla de validación.
 4. Exporta el resultado a **Excel (.xlsx)** o **CSV** con los cálculos ya resueltos.
 
+### Contenido del Excel exportado
+
+El `.xlsx` descargado incluye, en este orden, las siguientes hojas:
+
+| Hoja | Contenido |
+|------|-----------|
+| `MANUFACTURA` | Hoja original cargada, tal cual. |
+| `INV001` | Hoja de inventario original. |
+| `INV043` | Hoja de inventario original — **solo si existía** en el archivo de entrada. |
+| `CEPP` | Filas de `MANUFACTURA` con `TIPO CONSUMO = CEPP`, con todas las columnas originales. |
+| `ANALISIS` | Tabla de análisis (OBSERVACION, Item, ..., columnas por bodega, Total general, INV, VAL). |
+
+> **Nota sobre el formato:** SheetJS en su versión gratuita exporta **solo valores, no formato**.
+> Las hojas originales conservan todos los datos, pero pierden colores de relleno, anchos de
+> columna y estilos al re-exportarse. Si el área de almacén necesita preservar el formato visual
+> original (por ejemplo, el marcado en amarillo como control humano), se debe evaluar una
+> librería alternativa como **ExcelJS**. La exportación a **CSV** no cambió.
+
 > Requiere conexión a internet la primera vez para cargar la librería **SheetJS** desde su CDN.
 
 ## Estructura esperada del archivo
