@@ -51,10 +51,24 @@ Columnas usadas de `MANUFACTURA`: `TIPO CONSUMO`, `Bodega`, `Item`, `Desc. item`
 1. **Filtrar**: solo filas con `TIPO CONSUMO = CEPP` (sin distinguir mayúsculas, con `trim()`).
 2. **Agrupar**: por `Item + Desc. item + U.M. + UE-FC + Bodega`, sumando `SOLICITUD`.
    Las bodegas detectadas se vuelven columnas dinámicas. Se calcula el **Total general** por ítem.
-3. **INV** (tipo VLOOKUP): primera coincidencia del ítem en el inventario correspondiente
-   (`INV001`, o `INV043` si la bodega es 043). Si no existe, `INV = 0`.
-4. **Validación**: `VAL = INV − Total general`.
-   `OBSERVACION = "NO SALE POR EXISTENCIA"` cuando `VAL < 0`; vacío cuando `VAL ≥ 0`.
+3. **INV** (tipo VLOOKUP): primera coincidencia del ítem en el inventario correspondiente. Si no existe, `INV = 0`.
+4. **Validación**: `VAL = INV − Total general`, con **OBSERVACION de tres estados**:
+   - `INV ≥ Total general` → OBSERVACION **vacío** (sale completo).
+   - `0 < INV < Total general` → **"Sale parcial por existencias"** (resaltado **ámbar**).
+   - `INV ≤ 0` → **"NO SALE POR EXISTENCIA"** (resaltado **rojo**).
+
+### Separación de la bodega 043
+
+Cuando los datos CEPP incluyen la bodega **043** (y por tanto la hoja `INV043`), el análisis se
+divide en **dos tablas independientes**, lado a lado y separadas por **dos columnas vacías**, tanto
+en pantalla como en la hoja `ANALISIS` del Excel:
+
+- **Tabla principal** (izquierda): todas las bodegas **excepto** 043; su `INV` se busca en `INV001`.
+- **Tabla 043** (derecha): únicamente la bodega 043; su `INV` se busca en `INV043` (0 si no existe la hoja).
+
+Cada tabla tiene su propio **bloque de tarjetas de resumen** ("Resumen — Bodegas principales" y
+"Resumen — Bodega 043") con sus cifras (ítems, SOLICITUD, no salen, salen parcial, bodegas). Cuando
+**no** existe la 043, se muestra una sola tabla y un solo bloque de resumen, como antes.
 
 ### Correcciones de datos aplicadas
 
