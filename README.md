@@ -76,30 +76,34 @@ Cada tabla tiene su propio **bloque de tarjetas de resumen** ("Resumen — Bodeg
 - `Item` se normaliza con `String(item).trim()` para el cruce (es numérico en ambas hojas).
 - Los códigos de bodega se **descubren dinámicamente**; no están hardcodeados.
 
-## Ajuste a múltiplo de U.M.
+## Ajuste a múltiplo de UE_FC
 
 Módulo adicional (sección propia bajo el análisis) que ajusta las cantidades para que la **suma
-por grupo** sea un número entero (múltiplo de 1 de su U.M.), sin tocar la SOLICITUD original ni
-la hoja MANUFACTURA.
+por grupo** sea un **múltiplo exacto de `UE_FC`** (factor numérico: 1, 2, 2.12, 2.3, 3, 4, 6…),
+sin tocar la SOLICITUD original ni la hoja MANUFACTURA. La `U.M.` (m, kg, und) es solo texto y no
+se usa como base. Con `UE_FC` fraccionario el total ajustado puede quedar fraccionario (ej.
+`38.16 = 18 × 2.12`): es correcto, debe ser múltiplo exacto de `UE_FC`.
 
-- **Columnas nuevas** (localizadas por nombre): `CEPP` (clase: `M2`/`Forrado`/`Estructura`/`Elect M2`
-  — **distinta** de `TIPO CONSUMO`), `LINEA` (`PESADA`/`BUSSTAR`) y `O.P. Número`.
+- **Columnas** (localizadas por nombre): `CEPP` (clase: `M2`/`Forrado`/`Estructura`/`Elect M2`
+  — **distinta** de `TIPO CONSUMO`), `Desc. C.trabajo`, `UE_FC` y `O.P. Número`. **Aviso:** MANUFACTURA
+  trae `Desc. C.trabajo` **dos veces** (columnas P y Z); se usa siempre la **primera (P)**.
+- **UE_FC del grupo**: el valor numérico más frecuente del grupo; si es inválido/0/vacío se usa `1`.
 - **Agrupación**: por `Item` + clase `CEPP`; para las cuatro clases especiales (`m2`, `forrado`,
   `estructura`, `electm2`, comparadas **sin espacios y en minúsculas**, así `ELECT M2` = `ElectM2`)
-  se agrega también la `LINEA`. Cada fila es una O.P. ajustable (un mismo `O.P. Número` puede repetirse).
-- **Algoritmo determinístico** por grupo: si el total ya es entero, no se ajusta; si no, se compara
-  bajar a `floor` vs subir a `ceil` y se elige el de **menor cantidad de unidades cambiadas** (desempate
-  por menor impacto porcentual agregado). Subir reparte proporcional a la SOLICITUD; bajar elimina a 0
-  las O.P. más pequeñas (de menor a mayor) y reparte el residuo entre las restantes. Ninguna O.P. queda
-  negativa y la suma iguala exactamente el múltiplo (el residuo de coma flotante se cierra en la O.P. mayor).
-- **Salida**: tarjetas de resumen (grupos analizados/ajustados, O.P. modificadas/eliminadas, unidades
-  agregadas/quitadas) y un panel por grupo con el detalle de cada O.P. (original, ajustada, delta, %
-  impacto); O.P. eliminadas en **rojo** y modificadas en **ámbar**.
-- **Excel**: hoja **`AJUSTE_UM`** añadida por los dos caminos de exportación (ExcelJS con formato y
-  SheetJS de respaldo), después de `ANALISIS`.
+  se agrega también `Desc. C.trabajo`. Cada fila es una O.P. ajustable (un mismo `O.P. Número` puede repetirse).
+- **Algoritmo determinístico** por grupo con `k = UE_FC`: si el total ya es múltiplo de `k`, no se
+  ajusta. Si no, se **prefiere subir** al múltiplo completo (`ceilMult`) siempre que sea factible con un
+  **tope duro del 130 %** por O.P. (`ceilMult ≤ Σ 1.30·SOLICITUD`); en caso contrario se baja a `floorMult`.
+  Subir reparte proporcional a la SOLICITUD y topa cada O.P. a `1.30×` (redistribuyendo el excedente entre
+  las que tengan margen); bajar elimina a 0 las O.P. más pequeñas y reparte el residuo. Ninguna O.P. queda
+  negativa ni supera el 130 %, y la suma iguala exactamente el múltiplo.
+- **Salida**: tarjetas de resumen y un panel por grupo con `UE-FC`, `Desc. C.trabajo` y el detalle de cada
+  O.P. (original, ajustada, delta, % impacto); O.P. eliminadas en **rojo** y modificadas en **ámbar**.
+- **Excel**: hoja **`AJUSTE_UM`** (con columnas `UE-FC` y `Desc. C.trabajo`) añadida por los dos caminos de
+  exportación (ExcelJS con formato y SheetJS de respaldo), después de `ANALISIS`.
 
 ## Manejo de errores
 
 Se avisa en pantalla, sin fallar en silencio, cuando: falta la hoja `MANUFACTURA` o `INV001`,
 no existe la columna `TIPO CONSUMO`, faltan columnas obligatorias (incluidas `CEPP` de clase,
-`LINEA` y `U.M.` que requiere el módulo de ajuste), o ninguna fila tiene `CEPP`.
+`Desc. C.trabajo`, `UE_FC` y `U.M.` que requiere el módulo de ajuste), o ninguna fila tiene `CEPP`.

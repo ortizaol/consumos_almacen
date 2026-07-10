@@ -79,7 +79,7 @@
   .cards.cards-6{grid-template-columns:repeat(6,1fr)}
   @media(max-width:1100px){ .cards.cards-6{grid-template-columns:repeat(3,1fr)} }
   @media(max-width:680px){ .cards.cards-6{grid-template-columns:repeat(2,1fr)} }
-  /* ---- Sección Ajuste a múltiplo de U.M. ---- */
+  /* ---- Sección Ajuste a múltiplo de UE_FC ---- */
   .section-sep{height:1px; background:var(--line); margin:28px 0 4px}
   .ajuste-groups{display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:14px}
   @media(max-width:900px){ .ajuste-groups{grid-template-columns:1fr} }
@@ -334,10 +334,11 @@
     const cUM   = findCol(headers, ['U.M.','UM','Unidad','U M']);
     const cSol  = findCol(headers, ['SOLICITUD','Solicitud','Cantidad solicitada']);
     const cUEFC = findCol(headers, ['UE_FC','UE-FC','UE FC','UEFC']);
-    // --- Columnas del módulo "Ajuste a múltiplo de U.M." ---
+    // --- Columnas del módulo "Ajuste a múltiplo de UE_FC" ---
     // OJO: cClaseCEPP es la columna de CLASE (M2/Forrado/Estructura/Elect M2), NO cTipo (TIPO CONSUMO).
     const cClaseCEPP = findCol(headers, ['CEPP']);
-    const cLinea     = findCol(headers, ['LINEA','Linea','Línea']);
+    // Desc. C.trabajo aparece DOS veces (columnas P y Z); findCol devuelve la PRIMERA (P).
+    const cDescTrab  = findCol(headers, ['Desc. C.trabajo','Desc C trabajo','Desc. Centro trabajo']);
     const cOP        = findCol(headers, ['O.P. Número','OP Número','OP Numero','O.P. Numero']);
 
     const missing = [];
@@ -349,14 +350,15 @@
       return;
     }
 
-    // Columnas requeridas por el módulo de Ajuste a múltiplo de U.M.
+    // Columnas requeridas por el módulo de Ajuste a múltiplo de UE_FC.
     const missingAjuste = [];
     if(cClaseCEPP<0) missingAjuste.push('CEPP (clase M2/Forrado/Estructura/Elect M2)');
-    if(cLinea<0)     missingAjuste.push('LINEA');
+    if(cDescTrab<0)  missingAjuste.push('Desc. C.trabajo');
+    if(cUEFC<0)      missingAjuste.push('UE_FC');
     if(cUM<0)        missingAjuste.push('U.M.');
     if(cSol<0)       missingAjuste.push('SOLICITUD');
     if(missingAjuste.length){
-      fatal('Faltan columnas para el «Ajuste a múltiplo de U.M.»', '<br>No se ubicaron: <b>'+missingAjuste.join(', ')+'</b>.<br>Recuerda que la columna <b>CEPP</b> de clase es distinta de <b>TIPO CONSUMO</b>.<br>Encabezados detectados: '+headers.map(h=>'<code>'+h+'</code>').join(', ')+'.');
+      fatal('Faltan columnas para el «Ajuste a múltiplo de UE_FC»', '<br>No se ubicaron: <b>'+missingAjuste.join(', ')+'</b>.<br>Recuerda que la columna <b>CEPP</b> de clase es distinta de <b>TIPO CONSUMO</b>, y que <b>UE_FC</b> es el factor numérico base del múltiplo.<br>Encabezados detectados: '+headers.map(h=>'<code>'+h+'</code>').join(', ')+'.');
       return;
     }
 
@@ -380,10 +382,10 @@
         uefc: cUEFC>=0 ? String(row[cUEFC]==null?'':row[cUEFC]).trim(): '',
         bod:  String(row[cBod]==null?'':row[cBod]).trim(),   // limpia "001  "
         sol:  toNum(row[cSol]),
-        // Campos para el módulo de Ajuste a múltiplo de U.M.
-        claseCEPP: cClaseCEPP>=0 ? String(row[cClaseCEPP]==null?'':row[cClaseCEPP]).trim() : '',
-        linea:     cLinea>=0     ? String(row[cLinea]==null?'':row[cLinea]).trim()         : '',
-        opNum:     cOP>=0        ? String(row[cOP]==null?'':row[cOP]).trim()               : ''
+        // Campos para el módulo de Ajuste a múltiplo de UE_FC.
+        claseCEPP:   cClaseCEPP>=0 ? String(row[cClaseCEPP]==null?'':row[cClaseCEPP]).trim() : '',
+        desctrabajo: cDescTrab>=0  ? String(row[cDescTrab]==null?'':row[cDescTrab]).trim()   : '',
+        opNum:       cOP>=0        ? String(row[cOP]==null?'':row[cOP]).trim()               : ''
       };
       bodegasSet.add(rec.bod);
       ceppRecords.push(rec);
@@ -423,7 +425,7 @@
 
     MODEL = {
       has043, tables,
-      ajusteUM: buildAjusteUM(ceppRecords),   // módulo de Ajuste a múltiplo de U.M.
+      ajusteUM: buildAjusteUM(ceppRecords),   // módulo de Ajuste a múltiplo de UE_FC
       // Referencias a las hojas ORIGINALES del workbook ya parseado, para re-exportarlas
       // tal cual (SheetJS gratuito conserva valores; el formato visual no se preserva).
       source:{
@@ -482,22 +484,39 @@
   }
 
   // ===========================================================================
-  //  Módulo: Ajuste a múltiplo de U.M.
+  //  Módulo: Ajuste a múltiplo de UE_FC
   // ===========================================================================
   const AJUSTE_ESPECIALES = new Set(['m2','forrado','estructura','electm2']);
   const EPS = 1e-9;
+  const CAP = 1.30;   // tope duro por OP: la cantidad ajustada no supera 130% de su SOLICITUD
 
-  // Clave de agrupación: item + claseCEPP; y además LÍNEA solo para las 4 clases especiales.
+  // Clave de agrupación: item + claseCEPP; y además Desc. C.trabajo solo para las 4 clases especiales.
   // Normaliza SIN espacios y en minúsculas ("ELECT M2" -> "electm2").
   function ajusteKey(rec){
     const normClase = String(rec.claseCEPP).toLowerCase().replace(/\s+/g,'');
-    const useLinea = AJUSTE_ESPECIALES.has(normClase);
-    return { key: rec.item+'||'+rec.claseCEPP+(useLinea?'||'+rec.linea:''), useLinea };
+    const useDesc = AJUSTE_ESPECIALES.has(normClase);
+    return { key: rec.item+'||'+rec.claseCEPP+(useDesc?'||'+rec.desctrabajo:''), useDesc };
   }
 
-  // Reparte el incremento ARRIBA proporcionalmente a la sol de cada OP.
+  // Reparte el incremento ARRIBA proporcionalmente a la sol de cada OP, con tope 130% por OP;
+  // el excedente que no cupo se redistribuye entre las OP con margen (proporcional al margen),
+  // iterando hasta alcanzar ceilMult (garantizado por ceilMult <= capTotal).
   function distributeUp(ops, T, deltaArriba){
-    return ops.map(o=> o.sol + (T>EPS ? (o.sol/T)*deltaArriba : deltaArriba/ops.length));
+    const cap = ops.map(o=> CAP*o.sol);
+    const adj = ops.map((o,i)=> Math.min(cap[i], o.sol + (T>EPS ? (o.sol/T)*deltaArriba : deltaArriba/ops.length)));
+    const target = T + deltaArriba;
+    for(let iter=0; iter<1000; iter++){
+      const sum = adj.reduce((a,x)=>a+x,0);
+      const need = target - sum;
+      if(need <= 1e-12) break;
+      const margins = ops.map((o,i)=> Math.max(0, cap[i]-adj[i]));
+      const totalMargin = margins.reduce((a,m)=>a+m,0);
+      if(totalMargin <= 1e-15) break;   // sin más margen (no debería ocurrir si ceilMult<=capTotal)
+      for(let i=0;i<ops.length;i++){
+        if(margins[i] > 1e-15) adj[i] = Math.min(cap[i], adj[i] + need*(margins[i]/totalMargin));
+      }
+    }
+    return adj;
   }
   // Reparte ABAJO: elimina a 0 las OP más pequeñas (sol <= delta restante), de menor a mayor;
   // el residuo se reparte proporcionalmente entre las restantes.
@@ -521,22 +540,28 @@
     }
     return adj;
   }
-  // Cierra el residuo de coma flotante en la OP de MAYOR sol para igualar el objetivo exacto.
-  function closeResidue(adj, ops, target){
-    const sum = adj.reduce((a,x)=>a+x,0);
-    const diff = target - sum;
-    if(Math.abs(diff) > 1e-12){
-      let mi=0; for(let i=1;i<ops.length;i++){ if(ops[i].sol > ops[mi].sol) mi=i; }
-      adj[mi] += diff; if(adj[mi]<0) adj[mi]=0;
+  // Cierra el residuo de coma flotante para igualar el objetivo exacto, empezando por la OP de
+  // mayor sol. Hacia arriba respeta el tope (caps[i]); hacia abajo no baja de 0.
+  function closeResidue(adj, ops, target, caps){
+    let diff = target - adj.reduce((a,x)=>a+x,0);
+    if(Math.abs(diff) <= 1e-12) return;
+    const order = ops.map((o,i)=>i).sort((a,b)=> ops[b].sol - ops[a].sol);
+    if(diff > 0){
+      for(const i of order){
+        const room = (caps ? caps[i] : Infinity) - adj[i];
+        if(room > 1e-15){ const add=Math.min(room,diff); adj[i]+=add; diff-=add; if(diff<=1e-12) break; }
+      }
+    } else {
+      for(const i of order){
+        const room = adj[i];   // cuánto puede bajar sin quedar negativo
+        if(room > 1e-15){ const take=Math.min(room,-diff); adj[i]-=take; diff+=take; if(Math.abs(diff)<=1e-12) break; }
+      }
     }
   }
-  // Impacto porcentual agregado (suma de |Δ|/sol) para desempatar dirección.
-  function aggPct(ops, adj){
-    return ops.reduce((a,o,i)=> a + (o.sol>EPS ? Math.abs(adj[i]-o.sol)/o.sol : (Math.abs(adj[i])>EPS?1:0)), 0);
-  }
 
-  // Ajuste determinístico de un grupo para que la suma total sea entera (múltiplo de 1 de la U.M.).
-  function adjustGroup(ops){
+  // Ajuste determinístico de un grupo para que la suma total sea múltiplo exacto de UE_FC (k).
+  function adjustGroup(ops, uefc){
+    const k = (uefc && uefc>0) ? uefc : 1;
     const T = ops.reduce((a,o)=>a+o.sol,0);
     const mkOps = (adj)=> ops.map((o,i)=>{
       const a = adj ? adj[i] : o.sol;
@@ -546,45 +571,51 @@
       const pct = o.sol>EPS ? (delta/o.sol)*100 : (modified ? (a>0?100:-100) : 0);
       return { opNum:o.opNum, sol:o.sol, adj:a, delta, pct, modified, eliminated };
     });
-    const rounded = Math.round(T);
+    const rounded = Math.round(T/k)*k;
     if(Math.abs(T - rounded) < EPS){
-      const outOps = mkOps(null);
-      return { ops:outOps, totalOrig:T, totalAdj:rounded, direction:'Sin cambio', unitsChanged:0 };
+      return { ops:mkOps(null), totalOrig:T, totalAdj:rounded, direction:'Sin cambio', unitsChanged:0 };
     }
-    const floorT = Math.floor(T), ceilT = Math.ceil(T);
-    const deltaAbajo = T - floorT, deltaArriba = ceilT - T;
-    let dir;
-    if(Math.abs(deltaAbajo - deltaArriba) < EPS){
-      // Empate (T = x.5): menor impacto porcentual agregado.
-      const up = distributeUp(ops,T,deltaArriba), down = distributeDown(ops,deltaAbajo);
-      const pu = aggPct(ops,up), pd = aggPct(ops,down);
-      dir = (pd < pu - 1e-12) ? 'down' : (pu < pd - 1e-12) ? 'up' : 'down';
-    } else {
-      dir = deltaAbajo < deltaArriba ? 'down' : 'up';   // menor cantidad total de unidades cambiadas
-    }
+    const floorMult = Math.floor(T/k)*k, ceilMult = Math.ceil(T/k)*k;
+    const deltaAbajo = T - floorMult, deltaArriba = ceilMult - T;
+    const capTotal = ops.reduce((a,o)=> a + CAP*o.sol, 0);
     let adj, target, direction;
-    if(dir==='up'){ adj = distributeUp(ops,T,deltaArriba); target = ceilT;  direction='Subió'; }
-    else          { adj = distributeDown(ops,deltaAbajo);  target = floorT; direction='Bajó';  }
-    closeResidue(adj, ops, target);
+    if(ceilMult <= capTotal + EPS){
+      // Subir al múltiplo completo es factible dentro del 130% -> se prefiere sobrecargar.
+      adj = distributeUp(ops, T, deltaArriba); target = ceilMult; direction='Subió';
+      closeResidue(adj, ops, target, ops.map(o=> CAP*o.sol));
+    } else {
+      adj = distributeDown(ops, deltaAbajo);   target = floorMult; direction='Bajó';
+      closeResidue(adj, ops, target, null);
+    }
     const outOps = mkOps(adj);
     const unitsChanged = outOps.reduce((s,x)=>s+Math.abs(x.delta),0);
     return { ops:outOps, totalOrig:T, totalAdj:target, direction, unitsChanged };
+  }
+
+  // UE_FC del grupo: el valor numérico más frecuente; si es inválido/0/vacío -> 1.
+  function groupUefc(counts){
+    let best=null, bestN=-1;
+    for(const [v,n] of counts){ if(n>bestN){ best=v; bestN=n; } }   // Map preserva orden -> desempate determinístico
+    return (best && best>0) ? best : 1;
   }
 
   // Construye los grupos ajustados + el resumen agregado a partir de ceppRecords.
   function buildAjusteUM(records){
     const groups=new Map();
     for(const rec of records){
-      const {key, useLinea} = ajusteKey(rec);
+      const {key, useDesc} = ajusteKey(rec);
       let g=groups.get(key);
-      if(!g){ g={ item:rec.item, claseCEPP:rec.claseCEPP, linea: useLinea?rec.linea:'', um:rec.um, useLinea, ops:[] }; groups.set(key,g); }
+      if(!g){ g={ item:rec.item, claseCEPP:rec.claseCEPP, desctrabajo: useDesc?rec.desctrabajo:'', um:rec.um, useDesc, ops:[], uefcCounts:new Map() }; groups.set(key,g); }
       g.ops.push({ opNum:rec.opNum, sol:rec.sol });   // cada fila = una OP independiente (opNum puede repetirse)
+      const uf = toNum(rec.uefc);
+      g.uefcCounts.set(uf, (g.uefcCounts.get(uf)||0)+1);
     }
     const out=[];
     let ajustados=0, opsMod=0, opsElim=0, uAgregadas=0, uQuitadas=0;
     for(const g of groups.values()){
-      const a = adjustGroup(g.ops);
-      const grp = { item:g.item, claseCEPP:g.claseCEPP, linea:g.linea, um:g.um, useLinea:g.useLinea,
+      const uefc = groupUefc(g.uefcCounts);
+      const a = adjustGroup(g.ops, uefc);
+      const grp = { item:g.item, claseCEPP:g.claseCEPP, desctrabajo:g.desctrabajo, um:g.um, uefc, useDesc:g.useDesc,
                     ops:a.ops, totalOrig:a.totalOrig, totalAdj:a.totalAdj, direction:a.direction, unitsChanged:a.unitsChanged };
       if(a.direction!=='Sin cambio') ajustados++;
       for(const o of a.ops){
@@ -677,7 +708,7 @@
     renderAjusteUM();
   }
 
-  // ---- Ajuste a múltiplo de U.M. (sección nueva bajo el análisis) ----
+  // ---- Ajuste a múltiplo de UE_FC (sección nueva bajo el análisis) ----
   function numFmt(x){
     if(typeof x!=='number' || !isFinite(x)) return String(x==null?'':x);
     const r = Math.round(x*10000)/10000;
@@ -697,7 +728,7 @@
       ['',      'Unidades quitadas',   numFmt(s.uQuitadas)]
     ];
     let h='<div class="section-sep"></div>';
-    h+='<div class="actions-bar"><span class="actions-title">🎯 Ajuste a múltiplo de U.M.</span></div>';
+    h+='<div class="actions-bar"><span class="actions-title">🎯 Ajuste a múltiplo de UE_FC</span></div>';
     h+='<div class="cards cards-6">'+cards.map(c=>
         '<div class="card '+c[0]+'"><div class="lbl">'+escapeHtml(c[1])+'</div><div class="val">'+fmt(c[2])+'</div></div>'
       ).join('')+'</div>';
@@ -709,22 +740,24 @@
     const dirCls = g.direction==='Subió'?'dir-up':g.direction==='Bajó'?'dir-down':'dir-none';
     let h='<div class="table-panel ajuste-panel'+(changed?' changed':'')+'">';
     h+='<div class="table-title">Item <b>'+escapeHtml(g.item)+'</b> · CEPP: '+escapeHtml(g.claseCEPP||'—')
-       +(g.useLinea?' · LÍNEA: '+escapeHtml(g.linea||'—'):'')+' · U.M.: '+escapeHtml(g.um||'1')+'</div>';
+       +(g.useDesc?' · Desc. C.trabajo: '+escapeHtml(g.desctrabajo||'—'):'')
+       +' · UE-FC: '+escapeHtml(numFmt(g.uefc))+' · U.M.: '+escapeHtml(g.um||'—')+'</div>';
     h+='<div class="table-scroll"><table><thead><tr>'
-       +'<th>O.P. Número</th><th class="num">SOLICITUD original</th><th class="num">SOLICITUD ajustada</th>'
+       +'<th class="num">UE-FC</th><th>O.P. Número</th><th class="num">SOLICITUD original</th><th class="num">SOLICITUD ajustada</th>'
        +'<th class="num">Delta</th><th class="num">% impacto</th></tr></thead><tbody>';
     for(const o of g.ops){
       const cls = o.eliminated?'falta':o.modified?'parcial':'';
       const deltaStr = (o.delta>0?'+':'')+numFmt(o.delta);
       const pctStr   = o.sol>0 ? (o.pct>0?'+':'')+o.pct.toFixed(1)+'%' : '—';
-      h+='<tr class="'+cls+'"><td>'+escapeHtml(o.opNum||'—')+'</td>'
+      h+='<tr class="'+cls+'"><td class="num">'+escapeHtml(numFmt(g.uefc))+'</td>'
+        +'<td>'+escapeHtml(o.opNum||'—')+'</td>'
         +'<td class="num">'+numFmt(o.sol)+'</td>'
         +'<td class="num">'+numFmt(o.adj)+'</td>'
         +'<td class="num">'+deltaStr+'</td>'
         +'<td class="num">'+pctStr+'</td></tr>';
     }
     h+='</tbody><tfoot><tr class="ajuste-foot">'
-       +'<td>Totales</td><td class="num">'+numFmt(g.totalOrig)+'</td><td class="num">'+numFmt(g.totalAdj)+'</td>'
+       +'<td colspan="2">Totales</td><td class="num">'+numFmt(g.totalOrig)+'</td><td class="num">'+numFmt(g.totalAdj)+'</td>'
        +'<td class="num '+dirCls+'" colspan="2">'+escapeHtml(g.direction)+' · '+numFmt(g.unitsChanged)+' u. cambiadas</td>'
        +'</tr></tfoot></table></div></div>';
     return h;
@@ -960,7 +993,7 @@
   // Matriz (encabezado + filas con estado) de la hoja AJUSTE_UM. Una fila por OP;
   // los totales del grupo se colocan en la primera fila de cada grupo.
   function ajusteUMMatrix(){
-    const header=['Item','CEPP','LINEA','U.M.','O.P. Número','SOLICITUD original','SOLICITUD ajustada','Delta','% impacto','Total original','Total ajustado','Dirección','Unidades cambiadas'];
+    const header=['Item','CEPP','Desc. C.trabajo','U.M.','UE-FC','O.P. Número','SOLICITUD original','SOLICITUD ajustada','Delta','% impacto','Total original','Total ajustado','Dirección','Unidades cambiadas'];
     const r4=x=>Math.round((Number(x)||0)*10000)/10000;
     const r1=x=>Math.round((Number(x)||0)*10)/10;
     const rows=[];
@@ -968,7 +1001,7 @@
     for(const g of groups){
       g.ops.forEach((o,i)=>{
         rows.push({ status: o.eliminated?'elim':o.modified?'mod':'', cells:[
-          g.item, g.claseCEPP, g.useLinea?g.linea:'', g.um,
+          g.item, g.claseCEPP, g.useDesc?g.desctrabajo:'', g.um, r4(g.uefc),
           o.opNum, r4(o.sol), r4(o.adj), r4(o.delta), o.sol>0?r1(o.pct):'',
           i===0?r4(g.totalOrig):'', i===0?r4(g.totalAdj):'', i===0?g.direction:'', i===0?r4(g.unitsChanged):''
         ]});
@@ -992,10 +1025,10 @@
         const c=ws.getCell(er,ci+1);
         c.value=(v===''?null:v);
         if(fill) c.fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}};
-        if(ci===4 && opColor) c.font={bold:true,color:{argb:opColor}}; // O.P. Número resaltada
+        if(ci===5 && opColor) c.font={bold:true,color:{argb:opColor}}; // O.P. Número resaltada
       });
     });
-    [12,14,12,8,16,18,18,10,11,15,15,12,18].forEach((w,i)=> ws.getColumn(i+1).width=w);
+    [12,14,26,8,8,16,18,18,10,11,15,15,12,18].forEach((w,i)=> ws.getColumn(i+1).width=w);
     return ws;
   }
 
@@ -1020,7 +1053,7 @@
     copyWorksheet(wsMan, wbOut, 'CEPP', (row, n)=> n===1 || cellText(row.getCell(cTipoCol).value).trim().toUpperCase()==='CEPP');
     // 5) ANALISIS — tabla calculada.
     buildAnalisisSheet(wbOut);
-    // 6) AJUSTE_UM — ajuste a múltiplo de U.M.
+    // 6) AJUSTE_UM — ajuste a múltiplo de UE_FC
     buildAjusteUMSheet(wbOut);
 
     const buf=await wbOut.xlsx.writeBuffer();
